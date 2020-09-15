@@ -1,12 +1,15 @@
 # directory to start file walking 
 # type "here" to use the script's current working directory
-crawl directory = here
-
+#crawl directory: here
+#crawl directory: C:\Users\andi\AppData\Local\Microsoft\Windows
+crawl directory: G:\
 # where to save the output csv to
-# type "here" to use the script's current working direktory
-output directory = here
+# type "here" to use the script's current working directory
+#output directory: here
+output directory: F:\pycharm_projects
 
 # should the script automatically detect meta data categories 
 # (will take much more time) or use categories from given file?
-# accepted values are "false, no, n" or a filepath
-pre-configured categories = false
+# accepted values are "false" or a filepath
+pre-configured categories: metadata_categories_all.txt
+#pre-configured categories: false

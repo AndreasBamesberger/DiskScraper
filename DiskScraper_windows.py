@@ -1,197 +1,217 @@
-"""step through whole filetree, list every file in csv"""
-#TODO: Size changes between bytes, KB, MB. write into separate column
+""" tool to look up metadata of every file in specified directory and store data
+in csv file. if config file provides path to file with user specified categories
+then program will only store those metadata categories, otherwise a new column
+is created for every category entry found """
 
-import os
 import csv
-import win32com.client # to read meta data
-from pathlib import Path # to get usable path
+import os
+from pathlib import Path  # to transform filepath into something usable
+import win32com.client  # to read meta data
+import logging  # for error logging to file
 
-def read_all_files(dir_src, categories, custom_columns): #pylint: disable=too-many-locals
-    """walk entire filetree of given path, for every file create a dictionary
-    with meta data and return list of created dictionaries """
 
-    file_list = [] # every entry is one dictionary holding the meta data of one file
+class DiscScraperWin:
+    def __init__(self, config_path):
+        logging.basicConfig(filename='error.log',
+                            level=logging.DEBUG,
+                            format='%(asctime)s %(levelname)s %(name)s %(message)s')
+        self._logger = logging.getLogger(__name__)
 
-    if custom_columns:
-        category_dict = categories
-    else:
-        category_dict = {}
+        self._sh = None
+        self._configs = self._read_config(config_path)
 
-    counter = 0 # counts files
+        self._source_dir = self._configs['crawl directory']
+        self._output_dir = self._configs['output directory']
+        self._output_file = self._create_file_name()
+        if self._configs['pre-configured categories']:
+            self._categories = self._read_categories_file()
+            self._setup_csv_file()
+        else:
+            self._categories = None
 
-    for root, _, files in os.walk(dir_src):
-        for filename in files:
+        print("self._configs: ")
+        print(repr(self._configs))
 
-            counter += 1
+        print("self._source_dir: ")
+        print(repr(self._source_dir))
 
-            filepath = os.path.join(root, filename)
-            print("{0}: {1}".format(str(counter), filepath))
-            filepath = Path(filepath)
+        print("self._output_dir: ")
+        print(repr(self._output_dir))
 
-            ns = sh.NameSpace(str(filepath.parent))
-            item = ns.ParseName(str(filepath.name))
+        print("self._output_file: ")
+        print(repr(self._output_file))
 
-            file_dict = {} # holds meta data of a single file
+        print("self._categories: ")
+        print(repr(self._categories))
 
-            if custom_columns:
-                for key, field in categories.items():
-                    colname = field
-                    attr_val = str(ns.GetDetailsOf(item, int(key))) # the meta data of the specific file, e.g. "test.txt"
-                    new_file_entry = {str(key): [str(colname), str(attr_val)]}
-                    file_dict.update(new_file_entry)
-                file_list.append(file_dict)
+    @staticmethod
+    def _read_config(config_path):
+        """
+        read input, output directories and specified categories from file. if no
+        config file exists, use the current working directory.
+        input: config_path:str, filepath to config file
+        output: out_dict:dict, holds all config file entries
+        """
+        out_dict = {}
+        try:
+            with open(config_path, "r", encoding="utf-8") as config_file:
+                for line in config_file.readlines():
+                    if line.startswith('#') or line == '\n':
+                        continue
+                    split = line.split(': ')
+                    split[-1] = split[-1].rstrip()
 
-            else:
-                colnum = 0
-                while colnum <= 350: # value arbitrary, last meta column should be 320
-                    colname = str(ns.GetDetailsOf(None, colnum)) # meta data category, e.g. "Name"
-                    attr_val = str(ns.GetDetailsOf(item, colnum)) # the meta data of the specific file, e.g. "test.txt"
-                    if attr_val != '' and colname != '':
-                        new_file_entry = {str(colnum): [str(colname), str(attr_val)]}
-                        file_dict.update(new_file_entry)
+                    if split[0] == "crawl directory":
+                        # use current working directory
+                        if split[-1] == "here":
+                            split[-1] = os.getcwd()
 
-                        if str(colnum) not in category_dict:
-                            new_category_entry = {str(colnum) : str(colname)} 
-                            category_dict.update(new_category_entry)
-                    colnum += 1
-                file_list.append(file_dict) 
+                        # remove trailing '/'
+                        if split[-1][-1] == '/':
+                            split[-1] = split[-1][:-1]
+                        out_dict.update({split[0]: split[-1]})
 
-    return file_list, category_dict
+                    if split[0] == "output directory":
+                        # use current working directory
+                        if split[-1] == "here":
+                            split[-1] = os.getcwd()
 
-def create_file_name(source, dest):
-    """directory that is crawled is used as output name"""
-    source = source.replace(' ', '') # remove whitespace
-    source = source.replace('-', '') # remove existing -
-    source = source.replace(':/', '-') 
-    source = source.replace(':', '-')
-    source = source.replace('/', '-')
-    source = source.replace('\\', '-') # transform G\\ into G--
-    source = source.replace('--', '-') # transform G-- into G-
-    return dest + source + '.csv'
+                        # add trailing '/'
+                        if split[-1][-1] != '/':
+                            split[-1] += '/'
 
-def read_config(configfile):
-    """from config file read:
-    1) directory to crawl
-    2) where to save csv output
-    3) if pre-configured categories should be used
-    returns crawl directory, output directory, bool value"""
-    source = ''
-    with open(configfile, 'r', encoding="utf-8") as config:
-        for line in config.readlines():
-            if line[0] == '#':
-                continue
-            elif "crawl directory" in line:
-                # remove first part of the line and '\n' at the end
-                source = line.replace("crawl directory = ", '')
-                if source[-1] == '\n':
-                    source = source[:-1]
-                if source == "here":
-                    source = os.getcwd()
+                        out_dict.update({split[0]: split[-1]})
+                    elif split[0] == "pre-configured categories":
+                        if split[-1].lower() == "false":
+                            out_dict.update({split[0]: None})
+                        else:
+                            out_dict.update({split[0]: split[-1]})
+        except FileNotFoundError:
+            cwd = os.getcwd()
+            out_dict.update({"crawl directory": cwd})
+            out_dict.update({"output directory": cwd})
+            out_dict.update({"pre-configured categories": None})
 
-                # delete trailing '/'
-                if source[-1] == '/':
-                    source = source[:-1]
+        return out_dict
 
-            elif "output directory" in line:
-                dest = line.split()[-1]
+    def _read_categories_file(self):
+        """ read file with categories, ignore lines starting with '#' and add
+        all other lines as dictionary entries
+        output: output_dict:dict, holds metadata category number and name,
+        e.g. {0: 'name'} """
+        output_list = list()
+        try:
+            with open(self._configs['pre-configured categories'], 'r') as categories_file:
+                for line in categories_file.readlines():
+                    if not line.startswith('#'):
+                        split = line.split(':')
+                        split[0] = split[0].strip()
+                        split[1] = split[1].strip()
+                        output_list.append(split[1])
+            return output_list
 
-                if dest == "here":
-                    dest = os.getcwd()
+        except FileNotFoundError:
+            print("specified categories file not found")
+            raise SystemError
 
-                # add trailing '/'
-                if dest[-1] != '/':
-                    dest += '/'
+    def _read_categories_file_old(self):
+        """ read file with categories, ignore lines starting with '#' and add
+        all other lines as dictionary entries
+        output: output_dict:dict, holds metadata category number and name,
+        e.g. {0: 'name'} """
+        output_dict = dict()
+        try:
+            with open(self._configs['pre-configured categories'], 'r') as categories_file:
+                for line in categories_file.readlines():
+                    if not line.startswith('#'):
+                        split = line.split('-')
+                        split[0] = split[0].strip()
+                        split[1] = split[1].strip()
+                        output_dict.update({split[0]: split[1]})
+            return output_dict
 
-            elif "pre-configured categories" in line:
-                if line.split()[-1].lower() in ['false', 'no', 'n']:
-                    custom_columns = False
-                else:
-                    # remove first part of the line and '\n' at the end
-                    custom_columns = line.replace("pre-configured categories = ", '')
-                    if custom_columns[-1] == '\n':
-                        custom_columns = custom_columns[:-1]
+        except FileNotFoundError:
+            print("specified categories file not found")
+            raise SystemError
 
-    return source, dest, custom_columns
+    def _create_file_name(self):
+        """ directory that is crawled through is used as output name
+        output: path:str, full path of output csv file"""
+        source = self._source_dir
+        dest = self._output_dir
+        source = source.replace(' ', '')  # remove whitespace
+        source = source.replace('-', '')  # remove existing -
+        source = source.replace(':/', '-')
+        source = source.replace(':', '-')
+        source = source.replace('/', '-')
+        source = source.replace('\\', '-')  # transform G\\ into G--
+        source = source.replace('--', '-')  # transform G-- into G-
+        path = os.path.join(dest, source) + '.csv'
+        return path
 
-def save_to_csv(output_name, file_list, category_dict):
-    """writes found files into csv file, 1 row per file, every metadata category in separate column"""
+    def _setup_csv_file(self):
+        """ create the first row with all column names """
 
-    category_codes = [] # this list determines the order in which the category columns will be printed
-    for key, field in category_dict.items():
-        if int(key) not in category_codes:
-            category_codes.append(int(key))
+        if not os.path.isfile(self._output_file):
+            with open(self._output_file, 'w', encoding='utf-16', newline='') as csv_file:
+                file_writer = csv.writer(csv_file, delimiter=';', quotechar='|',
+                                         quoting=csv.QUOTE_MINIMAL)
+                file_writer.writerow(self._categories)
 
-    category_codes.sort() # start with lowest code
+    def read_files(self):
+        """ reads every file in self._source_dir and calls self._read_meta_data on it """
 
-    # create first line of csv file with category names
-    first_line = []
-    for i in category_codes:
-        if str(i) in category_dict:
-            first_line.append(category_dict[str(i)])
+        # set up meta data reader
+        self._sh = win32com.client.gencache.EnsureDispatch('Shell.Application', 0)
 
-#    encoding = "utf-8"
-#    encoding = "cp1252"
-    encoding = "utf-16"
+        counter = 0
 
-    with open(output_name, "w", encoding=encoding) as csv_file:
-        filewriter = csv.writer(csv_file, delimiter=';', quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator = '\n')
-        filewriter.writerow(first_line)
+        for root, _, files in os.walk(self._source_dir):
+            for file_name in files:
+                counter += 1
 
-        for file in file_list:
-            writeout = []
+                file_path = os.path.join(root, file_name)
+                print("{}: {}".format(str(counter), file_path))
 
-            for i in category_codes:
-                if str(i) in file:
-                    writeout.append(file[str(i)][1])
-                else:
-                    writeout.append('')
+                self._read_meta_data(Path(file_path))
 
-            filewriter.writerow(writeout)
+    def _read_meta_data(self, win_path):
+        """ read the meta data of the given file, either every meta data
+        category or just the ones specified in the config file. after every read
+        file, save the meta data as a row in the output csv file """
 
-def read_needed_categories(categoryfile):
-    print("categoryfile = {0}".format(repr(categoryfile)))
-    output_dict ={} 
-    with open(categoryfile, "r") as category:
-        for line in category.readlines():
-            if line[0] != '#':
-                split = line.split()
-                new_entry = {split[0]: split[2]}
-                output_dict.update(new_entry)
+        try:
+            ns = self._sh.NameSpace(str(win_path.parent))
+            item = ns.ParseName(str(win_path.name))
 
-    return output_dict
+            meta_data_dict = dict()
+
+            for category_num in range(350):
+                category_name = str(ns.GetDetailsOf(None, category_num))
+                category_value = str(ns.GetDetailsOf(item, category_num))
+                if category_name != '' and category_value != '':
+                    # temp_dict = {str(category_num): [category_name, category_value]}
+                    temp_dict = {category_name: category_value}
+                    meta_data_dict.update(temp_dict)
+
+            self._save_single_entry(meta_data_dict)
+
+        except AttributeError as err:
+            self._logger.error('{}: {}'.format(err, win_path))
+
+    def _save_single_entry(self, meta_data_dict):
+        with open(self._output_file, 'a', encoding='utf-16', newline='') as csv_file:
+            file_writer = csv.writer(csv_file, delimiter=';', quotechar='|',
+                                     quoting=csv.QUOTE_MINIMAL)
+            row = self._categories.copy()
+            for index, value in enumerate(row):
+                try:
+                    row[index] = meta_data_dict[value]
+                except KeyError:
+                    row[index] = ''
+            file_writer.writerow(row)
 
 
 if __name__ == '__main__':
-    sh=win32com.client.gencache.EnsureDispatch('Shell.Application',0) # set up meta data reader
-
-    # get directory to crawl through and directory to save output to
-    configfile = "config.txt"
-
-    if not os.path.exists(configfile):
-        source = os.getcwd()
-        dest = os.getcwd()
-        custom_columns = False
-    else:
-        source, dest, custom_columns = read_config(configfile)
-
-    output_name = create_file_name(source, dest)
-    print("path to crawl: {0}".format(repr(source)))
-    print("output file: {0}".format(repr(output_name)))
-
-    if custom_columns:
-        needed_categories = read_needed_categories(custom_columns)
-
-        print("metadata categories to store in csv: ")
-        for key, field in needed_categories.items():
-            print("{0} - {1}".format(str(key), str(field)))
-    else: 
-        needed_categories = None
-
-    file_list, category_dict = read_all_files(source, needed_categories, custom_columns)
-
-    print("files found: {0}".format(str(len(file_list))))
-
-    if custom_columns:
-        save_to_csv(output_name, file_list, needed_categories)
-    else:
-        save_to_csv(output_name, file_list, category_dict)
+    scraper = DiscScraperWin("config.txt")
+    scraper.read_files()
