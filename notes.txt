@@ -1,10 +1,4 @@
-this file doesn't exist, explorer can't reach it
-    112237: C:\Users\andi\AppData\Local\Microsoft\Windows\History\History.IE5\container.dat
-    Traceback (most recent call last):
-      File "F:/pycharm_projects/DiskScraper/DiskScraper_windows.py", line 206, in <module>
-        scraper.read_files()
-      File "F:/pycharm_projects/DiskScraper/DiskScraper_windows.py", line 170, in read_files
-        self._read_meta_data(Path(file_path))
-      File "F:/pycharm_projects/DiskScraper/DiskScraper_windows.py", line 177, in _read_meta_data
-        item = ns.ParseName(str(win_path.name))
-    AttributeError: 'NoneType' object has no attribute 'ParseName'
+store read in filepath as first column in csv so checking old files is easier
+also store timestamp of reading as second column
+_read_existing: use csv.reader
+creating a new csv in a folder with a really long pathname causes error

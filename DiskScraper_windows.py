@@ -6,6 +6,8 @@ is created for every category entry found """
 import csv
 import os
 from pathlib import Path  # to transform filepath into something usable
+from datetime import datetime
+
 import win32com.client  # to read meta data
 import logging  # for error logging to file
 
@@ -17,14 +19,23 @@ class DiscScraperWin:
                             format='%(asctime)s %(levelname)s %(name)s %(message)s')
         self._logger = logging.getLogger(__name__)
 
+        self._existing_files = list()
         self._sh = None
         self._configs = self._read_config(config_path)
 
         self._source_dir = self._configs['crawl directory']
         self._output_dir = self._configs['output directory']
         self._output_file = self._create_file_name()
+
+        # check if output file already exists
+        if os.path.isfile(self._output_file):
+            print("self._output_file already exists")
+            self._read_existing()
+
         if self._configs['pre-configured categories']:
             self._categories = self._read_categories_file()
+            self._categories.insert(0, "Timestamp of reading")
+            self._categories.insert(0, "Filepath read by program")
             self._setup_csv_file()
         else:
             self._categories = None
@@ -44,6 +55,13 @@ class DiscScraperWin:
         print("self._categories: ")
         print(repr(self._categories))
 
+        print("len(self._existing_files): ")
+        print(repr(len(self._existing_files)))
+#        for _, value in enumerate(self._existing_files):
+#            print(repr(value))
+
+        print("---")
+
     @staticmethod
     def _read_config(config_path):
         """
@@ -58,7 +76,7 @@ class DiscScraperWin:
                 for line in config_file.readlines():
                     if line.startswith('#') or line == '\n':
                         continue
-                    split = line.split(': ')
+                    split = line.split(' = ')
                     split[-1] = split[-1].rstrip()
 
                     if split[0] == "crawl directory":
@@ -71,7 +89,7 @@ class DiscScraperWin:
                             split[-1] = split[-1][:-1]
                         out_dict.update({split[0]: split[-1]})
 
-                    if split[0] == "output directory":
+                    elif split[0] == "output directory":
                         # use current working directory
                         if split[-1] == "here":
                             split[-1] = os.getcwd()
@@ -173,6 +191,11 @@ class DiscScraperWin:
                 file_path = os.path.join(root, file_name)
                 print("{}: {}".format(str(counter), file_path))
 
+                if self._existing_files:
+                    if file_path in self._existing_files:
+                        print("file already read")
+                        continue
+
                 self._read_meta_data(Path(file_path))
 
     def _read_meta_data(self, win_path):
@@ -190,26 +213,60 @@ class DiscScraperWin:
                 category_name = str(ns.GetDetailsOf(None, category_num))
                 category_value = str(ns.GetDetailsOf(item, category_num))
                 if category_name != '' and category_value != '':
-                    # temp_dict = {str(category_num): [category_name, category_value]}
                     temp_dict = {category_name: category_value}
                     meta_data_dict.update(temp_dict)
+        # have to use broad exception because i can't find how to handle
+        # "pywintypes.com_error"
+        except Exception as err:
+            print('{}: {}'.format(err, win_path))
+            self._logger.error('{}, filepath={}'.format(err, win_path))
+            self._save_failed(win_path, '{}, filepath={}'.format(err, win_path))
+        else:
+            self._save_single_entry(win_path, meta_data_dict)
 
-            self._save_single_entry(meta_data_dict)
-
-        except AttributeError as err:
-            self._logger.error('{}: {}'.format(err, win_path))
-
-    def _save_single_entry(self, meta_data_dict):
+    def _save_single_entry(self, win_path, meta_data_dict):
+        """ write meta data of single file into output csv
+        input: meta_data_dict: dict, holds all meta data of single file """
         with open(self._output_file, 'a', encoding='utf-16', newline='') as csv_file:
             file_writer = csv.writer(csv_file, delimiter=';', quotechar='|',
                                      quoting=csv.QUOTE_MINIMAL)
             row = self._categories.copy()
+
             for index, value in enumerate(row):
                 try:
                     row[index] = meta_data_dict[value]
                 except KeyError:
                     row[index] = ''
+
+            # add timestamp as second column
+            row[1] = datetime.now()
+            # add read in file path as first column
+            row[0] = win_path
+
             file_writer.writerow(row)
+
+    def _save_failed(self, win_path, error):
+        """ if reading of file fails, write error as new row in output csv file
+        input: error:str, error message """
+        output = list()
+        output.append(win_path)
+        output.append(error)
+        with open(self._output_file, 'a', encoding='utf-16', newline='') as csv_file:
+            file_writer = csv.writer(csv_file, delimiter=';', quotechar='|',
+                                     quoting=csv.QUOTE_MINIMAL)
+            file_writer.writerow(output)
+
+    def _read_existing(self):
+        """ read entries of previously created output csv """
+        print("reading file entries of previously created csv file...")
+        with open(self._output_file, 'r', encoding='utf-16') as previous_file:
+            # dismiss the first row with the column descriptions
+            next(previous_file)
+
+            for line in previous_file:
+                line_split = line.split(';')
+                # first column of csv holds the file path
+                self._existing_files.append(line_split[0])
 
 
 if __name__ == '__main__':
