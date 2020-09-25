@@ -12,7 +12,7 @@ from pathlib import Path  # To transform filepath into something usable
 import win32com.client  # To read metadata
 
 
-class DiscScraperWin:
+class DiskScraperWin:
     """
         A class to extract metadata from files in a given directory.
 
@@ -390,5 +390,5 @@ class DiscScraperWin:
 
 
 if __name__ == '__main__':
-    scraper = DiscScraperWin("config.txt")
+    scraper = DiskScraperWin("config.txt")
     scraper.read_files()
