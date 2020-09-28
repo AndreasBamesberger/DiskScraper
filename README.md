@@ -15,10 +15,5 @@ Project progress can be viewed at: https://trello.com/b/jGlZOZjt/diskcrawler
 
 ## Launch
 1. Change the values in "config.txt" based on your preferences
-2. Launch "DiskScraper_windows.py" or "DiskScraper_windows.exe"
+2. Launch "disk_scraper_windows.py" or "disk_scraper_windows.exe"
 
-## Diagrams
-### Code structure
-![Code structure](./images/structure.png)
-### Flowchart
-![Flowchart](./images/flowchart.png)
